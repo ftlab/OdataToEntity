@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json;
 using OdataToEntity.Test.Model;
 using System;
 using System.Linq;
@@ -9,10 +10,25 @@ namespace OdataToEntity.Test
 {
     public sealed class BatchTest
     {
+        public void Action()
+        {
+            var fixture = new DbFixtureInitDb();
+            var parser = new OeParser(new Uri("http://dummy/"), fixture.OeDataAdapter, fixture.EdmModel);
+            var responseStream = new System.IO.MemoryStream();
+
+            String data = JsonConvert.SerializeObject(new { id = 1, name = "Order 1", status = "Unknown" });
+            System.IO.MemoryStream requestStream = null;//new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(data));
+
+            //parser.ExecutePostAsync(new Uri(@"http://dummy/GetOrders(name='Order 1',id=1,status=null)"), requestStream, responseStream, System.Threading.CancellationToken.None).Wait();
+            parser.ExecutePostAsync(new Uri(@"http://dummy/ResetDb"), requestStream, responseStream, System.Threading.CancellationToken.None).Wait();
+        }
+
         [Fact]
         public Task Add()
         {
             var fixture = new DbFixtureInitDb();
+            fixture.Initalize();
+
             using (var orderContext = fixture.CreateContext())
             {
                 Assert.Equal(8, orderContext.Categories.Count());
@@ -39,6 +55,8 @@ namespace OdataToEntity.Test
         public async Task Delete()
         {
             var fixture = new DbFixtureInitDb();
+            fixture.Initalize();
+
             await fixture.ExecuteBatchAsync("Delete");
             using (var orderContext = fixture.CreateContext())
             {
@@ -55,6 +73,8 @@ namespace OdataToEntity.Test
         public async Task Update()
         {
             var fixture = new DbFixtureInitDb();
+            fixture.Initalize();
+
             await fixture.ExecuteBatchAsync("Update");
             using (var orderContext = fixture.CreateContext())
             {

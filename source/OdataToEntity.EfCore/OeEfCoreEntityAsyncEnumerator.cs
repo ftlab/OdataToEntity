@@ -11,9 +11,9 @@ namespace OdataToEntity.EfCore
         private readonly IAsyncEnumerator<Object> _asyncEnumerator;
         private readonly CancellationToken _cancellationToken;
 
-        public OeEfCoreEntityAsyncEnumerator(IAsyncEnumerator<Object> asyncEnumerator, CancellationToken cancellationToken)
+        public OeEfCoreEntityAsyncEnumerator(IAsyncEnumerable<Object> asyncEnumerable, CancellationToken cancellationToken)
         {
-            _asyncEnumerator = asyncEnumerator;
+            _asyncEnumerator = asyncEnumerable.GetEnumerator();
             _cancellationToken = cancellationToken;
         }
 
@@ -26,12 +26,31 @@ namespace OdataToEntity.EfCore
             return _asyncEnumerator.MoveNext(_cancellationToken);
         }
 
-        public override Object Current
+        public override Object Current => _asyncEnumerator.Current;
+    }
+
+    public sealed class OeEfCoreEntityAsyncEnumeratorAdapter : OeEntityAsyncEnumerator
+    {
+        private readonly IEnumerator<Object> _enumerator;
+        private readonly CancellationToken _cancellationToken;
+
+        public OeEfCoreEntityAsyncEnumeratorAdapter(IEnumerable<Object> enumerable, CancellationToken cancellationToken)
         {
-            get
-            {
-                return _asyncEnumerator.Current;
-            }
+            _enumerator = enumerable.GetEnumerator();
+            _cancellationToken = cancellationToken;
         }
+
+        public override void Dispose()
+        {
+            _enumerator.Dispose();
+        }
+        public override Task<bool> MoveNextAsync()
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<bool>(_enumerator.MoveNext());
+        }
+
+        public override Object Current => _enumerator.Current;
+
     }
 }

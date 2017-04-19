@@ -15,15 +15,21 @@ namespace OdataToEntity.Parsers
         {
             if (constantExpression.Value == null)
                 return constantExpression;
+            if (constantExpression.Type == targetType)
+                return constantExpression;
 
             Object value;
             if (constantExpression.Type == typeof(DateTimeOffset))
             {
+                if (targetType == typeof(Nullable<DateTimeOffset>))
+                    return constantExpression;
                 if (targetType == typeof(DateTime))
                     return Expression.Constant(((DateTimeOffset)constantExpression.Value).DateTime);
             }
             else if (constantExpression.Type == typeof(Date))
             {
+                if (targetType == typeof(Nullable<Date>))
+                    return constantExpression;
                 if (targetType == typeof(DateTime))
                     return Expression.Constant((DateTime)((Date)constantExpression.Value));
             }
@@ -90,7 +96,7 @@ namespace OdataToEntity.Parsers
                     return iface.GetTypeInfo().GetGenericArguments()[0];
             return null;
         }
-        public static Type GetTupleType(Type[] typeArguments)
+        private static Type GetTupleType(Type[] typeArguments)
         {
             Type tupleType;
             switch (typeArguments.Length)

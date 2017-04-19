@@ -47,7 +47,7 @@ namespace OdataToEntity.Linq2Db
                 {
                     Expression argument = base.Visit(node.Arguments[i]);
                     var call = argument as MethodCallExpression;
-                    if (call != null && call.Type.IsGenericType && call.Type.GetGenericTypeDefinition() == typeof(IOrderedEnumerable<>))
+                    if (call != null && call.Type.GetTypeInfo().IsGenericType && call.Type.GetGenericTypeDefinition() == typeof(IOrderedEnumerable<>))
                     {
                         Type type = call.Type.GetGenericArguments()[0];
                         MethodInfo selectMethodInfo = OeMethodInfoHelper.GetSelectMethodInfo(type, type);
@@ -103,6 +103,13 @@ namespace OdataToEntity.Linq2Db
         }
 
         private readonly static Lazy<OeEntitySetMetaAdapterCollection> _entitySetMetaAdapters = new Lazy<OeEntitySetMetaAdapterCollection>(CreateEntitySetMetaAdapters);
+ 
+        public OeLinq2DbDataAdapter() : this(null)
+        {
+        }
+        public OeLinq2DbDataAdapter(Db.OeQueryCache queryCache) : base(queryCache)
+        {
+        }
 
         public override void CloseDataContext(Object dataContext)
         {
@@ -111,7 +118,7 @@ namespace OdataToEntity.Linq2Db
         }
         public override Object CreateDataContext()
         {
-            return Activator.CreateInstance<T>();
+            return Db.FastActivator.CreateInstance<T>();
         }
         private static OeEntitySetMetaAdapterCollection CreateEntitySetMetaAdapters()
         {
@@ -138,13 +145,20 @@ namespace OdataToEntity.Linq2Db
             var getEntitySet = (Func<T, ITable<TEntity>>)property.GetGetMethod().CreateDelegate(typeof(Func<T, ITable<TEntity>>));
             return new TableAdapterImpl<TEntity>(getEntitySet, property.Name);
         }
-        public override OeEntityAsyncEnumerator ExecuteEnumerator(IQueryable query, CancellationToken cancellationToken)
+        public override OeEntityAsyncEnumerator ExecuteEnumerator(Object dataContext, OeParseUriContext parseUriContext, CancellationToken cancellationToken)
         {
-            var visitor = new ParameterVisitor();
-            Expression expression = visitor.Visit(query.Expression);
-            query = query.Provider.CreateQuery(expression);
-            IEnumerable<Object> queryAsync = (IQueryable<Object>)query;
-            return new OeLinq2DbEntityAsyncEnumerator(queryAsync.GetEnumerator(), cancellationToken);
+            IQueryable entitySet = parseUriContext.EntitySetAdapter.GetEntitySet(dataContext);
+            Expression expression = parseUriContext.CreateExpression(entitySet, new OeConstantToVariableVisitor());
+            expression = new ParameterVisitor().Visit(expression);
+            var query = (IQueryable<Object>)entitySet.Provider.CreateQuery(expression);
+            return new OeLinq2DbEntityAsyncEnumerator(query.GetEnumerator(), cancellationToken);
+        }
+        public override TResult ExecuteScalar<TResult>(Object dataContext, OeParseUriContext parseUriContext)
+        {
+            IQueryable query = parseUriContext.EntitySetAdapter.GetEntitySet(dataContext);
+            Expression expression = parseUriContext.CreateExpression(query, new OeConstantToVariableVisitor());
+            expression = new ParameterVisitor().Visit(expression);
+            return query.Provider.Execute<TResult>(expression);
         }
         public override OeEntitySetAdapter GetEntitySetAdapter(String entitySetName)
         {

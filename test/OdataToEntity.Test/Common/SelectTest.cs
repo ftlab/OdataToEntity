@@ -2,18 +2,18 @@
 using OdataToEntity.Test.Model;
 using System;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Threading.Tasks;
 using Xunit;
 
 namespace OdataToEntity.Test
 {
-    public sealed class SelectTest : IClassFixture<DbFixtureInitDb>
+    public sealed partial class SelectTest : IClassFixture<DbFixtureInitDb>
     {
         private readonly DbFixtureInitDb _fixture;
 
         public SelectTest(DbFixtureInitDb fixture)
         {
+            fixture.Initalize();
             _fixture = fixture;
         }
 
@@ -146,8 +146,8 @@ namespace OdataToEntity.Test
         {
             var parameters = new QueryParameters<OrderItem, Object>()
             {
-                RequestUri = "OrderItems?$apply=groupby((OrderId))&$skip=1",
-                Expression = t => t.GroupBy(i => i.OrderId).Skip(1).Select(g => new { OrderId = g.Key })
+                RequestUri = "OrderItems?$apply=groupby((OrderId))&$orderby=OrderId&$skip=1",
+                Expression = t => t.GroupBy(i => i.OrderId).OrderBy(g => g.Key).Skip(1).Select(g => new { OrderId = g.Key })
             };
             await Fixture.Execute(parameters);
         }
@@ -232,12 +232,12 @@ namespace OdataToEntity.Test
             await Fixture.Execute(parameters);
         }
         [Fact]
-        public async Task ExpandExpandTop()
+        public async Task ExpandExpandSkipTop()
         {
             var parameters = new QueryParameters<Customer, Customer>()
             {
-                RequestUri = "Customers?$expand=AltOrders($expand=Items($top=1)),Orders($expand=Items($top=1))",
-                Expression = t => t.Include(c => c.AltOrders).Include(c => c.Orders).ThenInclude(o => o.Items.Take(1))
+                RequestUri = "Customers?$orderby=Id&$skip=1&$top=3&$expand=AltOrders($expand=Items($top=1)),Orders($expand=Items($top=1))",
+                Expression = t => t.OrderBy(o => o.Id).Skip(1).Take(3).Include(c => c.AltOrders).Include(c => c.Orders).ThenInclude(o => o.Items.Take(1))
             };
             await Fixture.Execute(parameters);
         }
@@ -422,16 +422,6 @@ namespace OdataToEntity.Test
             await Fixture.Execute(parameters);
         }
         [Fact]
-        public async Task FilterExpand()
-        {
-            var parameters = new QueryParameters<Order>()
-            {
-                RequestUri = "Orders(1)?$expand=Customer,Items",
-                Expression = t => t.Include(o => o.Customer).Include(o => o.Items).Where(o => o.CustomerId == 1)
-            };
-            await Fixture.Execute(parameters);
-        }
-        [Fact]
         public async Task FilterInt()
         {
             var parameters = new QueryParameters<OrderItem>()
@@ -572,7 +562,51 @@ namespace OdataToEntity.Test
             await Fixture.Execute(parameters);
         }
         [Fact]
-        public async Task OrderBy()
+        public async Task KeyExpand()
+        {
+            var parameters = new QueryParameters<Order>()
+            {
+                RequestUri = "Orders(1)?$expand=Customer,Items",
+                Expression = t => t.Include(o => o.Customer).Include(o => o.Items).Where(o => o.Id == 1)
+            };
+            await Fixture.Execute(parameters);
+        }
+        [Fact]
+        public async Task KeyFilter()
+        {
+            var parameters = new QueryParameters<Order, OrderItem>()
+            {
+                RequestUri = "Orders(1)/Items?$filter=Count ge 2",
+                Expression = t => t.Where(o => o.Id == 1).SelectMany(o => o.Items).Where(i => i.Count >= 2)
+            };
+            await Fixture.Execute(parameters);
+        }
+        [Fact]
+        public async Task KeyMultipleNavigationOne()
+        {
+            var parameters = new QueryParameters<OrderItem, Customer>()
+            {
+                RequestUri = "OrderItems(1)/Order/Customer",
+                Expression = t => t.Where(i => i.Id == 1).Select(i => i.Order.Customer)
+            };
+            await Fixture.Execute(parameters);
+        }
+        [Fact]
+        public async Task KeyNavigationGroupBy()
+        {
+            var parameters = new QueryParameters<OrderItem, Object>()
+            {
+                RequestUri = "OrderItems(1)/Order?$apply=groupby((CustomerId), aggregate(Status with min as min))",
+                Expression = t => t.Where(i => i.Id == 1).Select(i => i.Order).GroupBy(o => o.Id).Select(g => new
+                {
+                    CustomerId = g.Key,
+                    min = g.Min(a => a.Status)
+                })
+            };
+            await Fixture.Execute(parameters);
+        }
+        [Fact]
+        public async Task KeyOrderBy()
         {
             var parameters = new QueryParameters<Order, OrderItem>()
             {
@@ -602,6 +636,18 @@ namespace OdataToEntity.Test
             await Fixture.Execute(parameters);
         }
         [Fact]
+        public async Task Parameterization()
+        {
+            var parameters = new QueryParameters<Order>()
+            {
+                RequestUri = @"Orders?$filter=AltCustomerId eq 3 and CustomerId eq 4 and ((year(Date) eq 2016 and month(Date) gt 11 and day(Date) lt 20) or Date eq null) and contains(Name,'unknown') and Status eq OdataToEntity.Test.Model.OrderStatus'Unknown'
+&$expand=Items($filter=(Count eq 0 or Count eq null) and (Price eq 0 or Price eq null) and (contains(Product,'unknown') or contains(Product,'null')) and OrderId gt -1 and Id ne 1)",
+                Expression = t => t.Where(o => o.AltCustomerId == 3 && o.CustomerId == 4 && ((o.Date.GetValueOrDefault().Year == 2016 && o.Date.GetValueOrDefault().Month > 11 && o.Date.GetValueOrDefault().Day < 20) || o.Date == null) && o.Name.Contains("unknown") && o.Status == OrderStatus.Unknown)
+                .Include(o => o.Items.Where(i => (i.Count == 0 || i.Count == null) && (i.Price == 0 || i.Price == null) && (i.Product.Contains("unknown") || i.Product.Contains("null")) && i.OrderId > -1 && i.Id != 1))
+            };
+            await Fixture.Execute(parameters);
+        }
+        [Fact]
         public async Task Select()
         {
             var parameters = new QueryParameters<Order, Object>()
@@ -618,30 +664,6 @@ namespace OdataToEntity.Test
             {
                 RequestUri = "Orders?$select=Name",
                 Expression = t => t.Select(o => new { o.Name })
-            };
-            await Fixture.Execute(parameters);
-        }
-        [Fact]
-        public async Task SelectMultipleNavigationOne()
-        {
-            var parameters = new QueryParameters<OrderItem, Customer>()
-            {
-                RequestUri = "OrderItems(1)/Order/Customer",
-                Expression = t => t.Where(i => i.Id == 1).Select(i => i.Order.Customer)
-            };
-            await Fixture.Execute(parameters);
-        }
-        [Fact]
-        public async Task SelectNavigationGroupBy()
-        {
-            var parameters = new QueryParameters<OrderItem, Object>()
-            {
-                RequestUri = "OrderItems(1)/Order?$apply=groupby((CustomerId), aggregate(Status with min as min))",
-                Expression = t => t.Where(i => i.Id == 1).Select(i => i.Order).GroupBy(o => o.Id).Select(g => new
-                {
-                    CustomerId = g.Key,
-                    min = g.Min(a => a.Status)
-                })
             };
             await Fixture.Execute(parameters);
         }

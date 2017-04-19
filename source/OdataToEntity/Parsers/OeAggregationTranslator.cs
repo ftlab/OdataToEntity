@@ -24,11 +24,11 @@ namespace OdataToEntity.Parsers
         }
 
         private readonly List<AggProperty> _aggProperties;
-        private readonly IEdmModel _model;
+        private readonly OeQueryNodeVisitor _visitor;
 
-        public OeAggregationTranslator(IEdmModel model)
+        public OeAggregationTranslator(OeQueryNodeVisitor visitor)
         {
-            _model = model;
+            _visitor = visitor;
             _aggProperties = new List<AggProperty>();
         }
 
@@ -103,7 +103,7 @@ namespace OdataToEntity.Parsers
                 MethodCallExpression aggCallExpression = AggCallExpression(aggExpression.Method, sourceParameter, aggLambda);
                 expressions.Add(aggCallExpression);
 
-                _aggProperties.Add(CreateEdmProperty(_model, aggCallExpression.Type, aggExpression.Alias, false));
+                _aggProperties.Add(CreateEdmProperty(_visitor.EdmModel, aggCallExpression.Type, aggExpression.Alias, false));
             }
 
             NewExpression newExpression = OeExpressionHelper.CreateTupleExpression(expressions);
@@ -135,20 +135,23 @@ namespace OdataToEntity.Parsers
             foreach (GroupByPropertyNode node in transformation.GroupingProperties)
                 if (node.ChildTransformations != null && node.ChildTransformations.Count > 0)
                 {
-                    GroupByPropertyNode childNode = node.ChildTransformations.Single();
+                    if (node.ChildTransformations.Count > 1)
+                        throw new NotSupportedException();
+
+                    GroupByPropertyNode childNode = node.ChildTransformations[0];
                     String propertyName = node.Name + "_" + childNode.Name;
 
                     Expression e = visitor.TranslateNode(childNode.Expression);
                     expressions.Add(e);
 
-                    _aggProperties.Add(CreateEdmProperty(_model, e.Type, propertyName, true));
+                    _aggProperties.Add(CreateEdmProperty(_visitor.EdmModel, e.Type, propertyName, true));
                 }
                 else
                 {
                     Expression e = visitor.TranslateNode(node.Expression);
                     expressions.Add(e);
 
-                    _aggProperties.Add(CreateEdmProperty(_model, e.Type, node.Name, true));
+                    _aggProperties.Add(CreateEdmProperty(_visitor.EdmModel, e.Type, node.Name, true));
                 }
 
             NewExpression newExpression = OeExpressionHelper.CreateTupleExpression(expressions);
@@ -195,6 +198,10 @@ namespace OdataToEntity.Parsers
                     var filterTransformation = transformation as FilterTransformationNode;
                     source = ApplyFilter(source, filterTransformation);
                 }
+                else
+                {
+                    throw new NotSupportedException();
+                }
             }
 
             return source;
@@ -210,27 +217,24 @@ namespace OdataToEntity.Parsers
             MethodInfo countMethodInfo = OeMethodInfoHelper.GetCountMethodInfo(lambda.ReturnType);
             return Expression.Call(countMethodInfo, distinctCall);
         }
-        private static AggProperty CreateEdmProperty(IEdmModel model, Type type, String name, bool isGroup)
+        private static AggProperty CreateEdmProperty(IEdmModel model, Type clrType, String name, bool isGroup)
         {
-            Type underlyingType = Nullable.GetUnderlyingType(type);
+            Type underlyingType = Nullable.GetUnderlyingType(clrType);
             if (underlyingType != null)
-                type = underlyingType;
+                clrType = underlyingType;
 
-            bool nullable = PrimitiveTypeHelper.IsNullable(type);
+            bool nullable = PrimitiveTypeHelper.IsNullable(clrType);
             IEdmTypeReference edmTypeRef;
-            if (type.GetTypeInfo().IsEnum)
+            if (clrType.GetTypeInfo().IsEnum)
             {
-                var edmEnumType = (IEdmEnumType)model.FindType(type.FullName);
+                var edmEnumType = (IEdmEnumType)model.FindType(clrType.FullName);
                 edmTypeRef = new EdmEnumTypeReference(edmEnumType, nullable);
             }
             else
-            {
-                IEdmPrimitiveType edmPrimitiveType = PrimitiveTypeHelper.GetPrimitiveType(type);
-                edmTypeRef = EdmCoreModel.Instance.GetPrimitive(edmPrimitiveType.PrimitiveKind, nullable);
-            }
+                edmTypeRef = PrimitiveTypeHelper.GetPrimitiveTypeRef(clrType, nullable);
             return new AggProperty(name, edmTypeRef, isGroup);
         }
-        public OeEntryFactory CreateEntryFactory(Type entityType, IEdmEntitySet entitySet, Type sourceType)
+        public OeEntryFactory CreateEntryFactory(Type entityType, IEdmEntitySetBase entitySet, Type sourceType)
         {
             OePropertyAccessor[] accessors;
             if (_aggProperties.Count == 0)
@@ -241,7 +245,7 @@ namespace OdataToEntity.Parsers
         }
         private OeQueryNodeVisitor CreateVisitor(ParameterExpression parameter)
         {
-            return new OeQueryNodeVisitor(_model, parameter);
+            return new OeQueryNodeVisitor(_visitor, parameter);
         }
         internal Expression TuplePropertyMapper(Expression source, String aliasName)
         {

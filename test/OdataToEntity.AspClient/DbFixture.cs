@@ -13,16 +13,16 @@ using Xunit;
 
 namespace OdataToEntity.Test
 {
-    public sealed partial class DbFixtureInitDb
+    public partial class DbFixtureInitDb
     {
         private delegate IList ExecuteQueryFunc<out T>(IQueryable query, Expression expression);
 
-        private readonly String _databaseName;
+        private readonly bool _clear;
+        private String _databaseName;
 
         public DbFixtureInitDb(bool clear = false)
         {
-            _databaseName = OrderContext.GenerateDatabaseName();
-            DbInit(_databaseName, clear);
+            _clear = clear;
         }
 
         public static Container CreateContainer()
@@ -36,13 +36,12 @@ namespace OdataToEntity.Test
             return (ExecuteQueryFunc<Object>)execMethodInfo.CreateDelegate(execFuncType);
         }
         partial void DbInit(String databaseName, bool clear);
-        public Task Execute<T, TResult>(QueryParametersScalar<T, TResult> parameters)
+        public virtual Task Execute<T, TResult>(QueryParametersScalar<T, TResult> parameters)
         {
             IList fromOe = ExecuteOe<T, TResult>(parameters.Expression);
-
             return Task.CompletedTask;
         }
-        public Task Execute<T, TResult>(QueryParameters<T, TResult> parameters)
+        public virtual Task Execute<T, TResult>(QueryParameters<T, TResult> parameters)
         {
             IList fromOe = ExecuteOe<T, TResult>(parameters.Expression);
             IList fromDb;
@@ -138,6 +137,11 @@ namespace OdataToEntity.Test
                 return container.Orders;
 
             throw new InvalidOperationException("unknown type " + typeof(T).Name);
+        }
+        public virtual void Initalize()
+        {
+            _databaseName = OrderContext.GenerateDatabaseName();
+            DbInit(_databaseName, _clear);
         }
         internal async static Task RunTest<T>(T testClass)
         {
